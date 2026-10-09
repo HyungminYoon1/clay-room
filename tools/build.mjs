@@ -12,4 +12,5 @@ await build({
   legalComments: "eof",
 });
 await copyFile("node_modules/three/LICENSE", "dist/assets/licenses/three.txt");
+await build({entryPoints:['tools/triangulate-entry.js'],outfile:'dist/vendor/triangulate.js',bundle:true,format:'esm',minify:true,target:['es2022'],legalComments:'eof'});
 console.log("Built pinned local Three.js module and license.");

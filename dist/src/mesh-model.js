@@ -111,7 +111,7 @@ export function validate(p) {
       !Array.isArray(x) ||
       x.length !== 3 ||
       !x.every((v) =>
-        bounds(v, k === "scale" ? 0.001 : -100, k === "scale" ? 100 : 100),
+        bounds(v, k === "scale" ? 0.001 : k === "rotation" ? -3600 : -100, k === "rotation" ? 3600 : 100),
       )
     )
       throw Error("변환 범위");

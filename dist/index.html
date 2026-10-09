@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <meta
       name="description"
@@ -14,6 +14,7 @@
     <title>CLAY ROOM · 3D 조각 공방</title>
     <link rel="icon" href="assets/icon.svg" />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="objects.css" />
     <script type="module" src="src/app.js"></script>
   </head>
   <body>
@@ -35,7 +36,7 @@
     </header>
     <div class="workspace">
       <nav class="tools" aria-label="조각 도구">
-        <button data-tool="view" aria-pressed="false"><span>↻</span>보기</button
+        <button data-tool="select"><span>↖</span>선택</button><button data-tool="pan"><span>✥</span>중심 이동</button><button data-tool="view" aria-pressed="false"><span>↻</span>보기</button
         ><button data-tool="add" aria-pressed="true"><span>＋</span>밀기</button
         ><button data-tool="subtract"><span>−</span>깎기</button
         ><button data-tool="smooth"><span>≈</span>다듬기</button
@@ -70,8 +71,7 @@
             <strong>STUDIO VIEW</strong><span id="mesh-count"></span>
           </div>
           <div id="cursor-help">
-            드래그로 조각 · Alt/오른쪽 드래그로 회전 · 휠로 확대 · Shift로
-            다듬기
+            선택 도구로 객체 선택 · 드래그로 조각 · 오른쪽 드래그로 회전 · 중심 이동 도구로 화면 이동
           </div>
         </div>
         <div class="view-status">
@@ -82,6 +82,21 @@
         </div>
       </main>
       <aside>
+        <section class="object-manager">
+          <h1>장면의 객체</h1><p id="object-count"></p><div id="object-list" aria-label="객체 목록"></div>
+          <div class="object-actions"><button id="add-object">＋ 덩어리 추가</button><button id="copy-object">복사</button><button id="delete-object">삭제</button></div>
+          <button id="merge-objects">체크한 객체를 하나로 묶기</button><p>병합은 모양을 그대로 유지합니다. 겹친 내부 면을 제거하는 불리언 합집합은 아닙니다.</p>
+          <p id="object-size"></p><p id="object-volume"></p>
+          <label>부피 배율<input id="volume-factor" type="number" value="1" min=".000001" max="1000000" step=".01"></label><button id="volume-apply">부피 비율 적용</button><p>배율 8은 세 축 길이를 각각 2배로 바꿉니다. 재질의 실제 질량을 정하는 기능은 아닙니다.</p>
+          <details class="cut-controls"><summary>평면·부피 비율로 나누기</summary>
+            <label>기준 평면<select id="plane-preset"><option value="0">YZ · X에 수직</option><option value="1">XZ · Y에 수직</option><option value="2">XY · Z에 수직</option></select></label>
+            <div class="plane-normal"><span>법선</span><label>X<input id="plane0" aria-label="절단 평면 법선 X" type="number" value="1" step=".001"></label><label>Y<input id="plane1" aria-label="절단 평면 법선 Y" type="number" value="0" step=".001"></label><label>Z<input id="plane2" aria-label="절단 평면 법선 Z" type="number" value="0" step=".001"></label></div>
+            <label>평면 위치 · m<input id="plane-offset" type="number" value="0" min="-100" max="100" step=".0001"></label>
+            <button id="plane-center">선택 객체의 중심으로</button><label class="toggle"><input id="show-plane" type="checkbox">절단 평면 표시</label><button id="cut-plane">이 평면에서 A / B로 분할</button>
+            <label>A의 부피 · %<input id="split-ratio" type="number" value="50" min="1" max="99" step=".1"></label><button id="cut-ratio">이 방향으로 부피 비율 분할</button><button id="cancel-cut" hidden>분할 취소</button>
+            <p>법선은 평면에 수직인 방향입니다. 숫자를 바꾸면 기울어진 평면도 만들 수 있습니다. 부피 비율은 닫힌 메시의 삼각형 부피로 계산하며, 단면도 실제 메시로 닫습니다. 복잡한 교차 표면은 분할을 거절할 수 있습니다.</p>
+          </details>
+        </section>
         <section>
           <h1>브러시</h1>
           <label
@@ -170,7 +185,7 @@
           <details>
             <summary>파일과 단위 안내</summary>
             <p>
-              GLB는 미터, STL은 밀리미터 좌표로 저장됩니다. 화면의
+              장면의 모든 객체를 저장합니다. GLB는 미터, STL은 밀리미터 좌표로 저장됩니다. 화면의
               격자·바닥·조명은 3D 파일에 포함되지 않습니다. 프로젝트 JSON을
               저장하면 다시 조각할 수 있습니다.
             </p>
@@ -179,14 +194,17 @@
               크기와 교차 면을 점검하세요.
             </p>
             <a href="assets/licenses/three.txt">Three.js · MIT</a> ·
+            <a href="assets/licenses/earcut.txt">Earcut · ISC</a> ·
             <a href="assets/fonts/OFL.txt">글꼴 · OFL</a>
           </details>
         </section>
+        <section class="camera-controls"><h2>카메라 중심</h2><div class="camera-target"><label>X<input id="camera0" aria-label="카메라 중심 X" type="number" min="-100" max="100" step=".001" value="0"></label><label>Y<input id="camera1" aria-label="카메라 중심 Y" type="number" min="-100" max="100" step=".001" value="0"></label><label>Z<input id="camera2" aria-label="카메라 중심 Z" type="number" min="-100" max="100" step=".001" value="0"></label></div><div class="camera-buttons"><button data-pan="-1,0" aria-label="카메라 중심 왼쪽">←</button><button data-pan="0,1" aria-label="카메라 중심 위">↑</button><button data-pan="0,-1" aria-label="카메라 중심 아래">↓</button><button data-pan="1,0" aria-label="카메라 중심 오른쪽">→</button></div><button id="focus-object">선택 객체에 맞추기</button><button id="fit-scene">장면 전체에 맞추기</button></section>
       </aside>
     </div>
     <dialog id="new-dialog">
       <form method="dialog">
         <h2>새 조각</h2>
+        <label>크기 · 최대 길이 m<input id="initial-size" type="number" min=".002" max="50" step=".001" value="2"></label>
         <label
           >시작 형태<select id="shape">
             <option value="sphere">구</option>
@@ -205,5 +223,6 @@
         </div>
       </form>
     </dialog>
+    <dialog id="add-dialog"><form method="dialog"><h2>덩어리 추가</h2><label>형태<select id="add-shape"><option value="sphere">구</option><option value="pebble">접힌 돌</option></select></label><label>크기 · 최대 길이 m<input id="add-size" type="number" min=".002" max="50" step=".001" value="1"></label><label>해상도<select id="add-quality"><option value="low">8066 정점</option><option value="medium">32258 정점</option></select></label><p>최대 8개 객체. 정점과 삼각형 한도는 장면 전체에 적용합니다.</p><div><button value="cancel">취소</button><button value="add">추가</button></div></form></dialog>
   </body>
 </html>
