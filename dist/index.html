@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta
+      name="description"
+      content="고밀도 메시를 직접 조각하고 GLB·STL·4K PNG로 저장하는 3D 조각 공방."
+    />
+    <title>CLAY ROOM · 3D 조각 공방</title>
+    <link rel="icon" href="assets/icon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body>
+    <a class="skip" href="#viewport">조각 화면으로</a>
+    <header>
+      <a class="brand" href="./"
+        ><b>Cr</b><span>CLAY ROOM<small>3D 조각 공방</small></span></a
+      ><input id="title" aria-label="조각 이름" maxlength="160" />
+      <div class="files">
+        <button id="new">새 조각</button
+        ><label class="file-open"
+          >열기<input
+            id="open"
+            type="file"
+            accept=".json,application/json" /></label
+        ><button id="save">프로젝트 저장</button
+        ><a href="https://hyungminyoon1.github.io/web-lab/">WEB LAB ↗</a>
+      </div>
+    </header>
+    <div class="workspace">
+      <nav class="tools" aria-label="조각 도구">
+        <button data-tool="view" aria-pressed="false"><span>↻</span>보기</button
+        ><button data-tool="add" aria-pressed="true"><span>＋</span>밀기</button
+        ><button data-tool="subtract"><span>−</span>깎기</button
+        ><button data-tool="smooth"><span>≈</span>다듬기</button
+        ><button data-tool="flatten"><span>▱</span>평탄화</button
+        ><button data-tool="crease"><span>⋎</span>주름</button>
+        <hr />
+        <button id="undo" title="Ctrl+Z">↶<small>실행 취소</small></button
+        ><button id="redo" title="Ctrl+Shift+Z">
+          ↷<small>다시 실행</small>
+        </button>
+      </nav>
+      <main>
+        <div class="view-bar">
+          <div>
+            <strong id="tool-name">밀기 브러시</strong><span>좌표 단위 m</span>
+          </div>
+          <div class="views">
+            <button data-view="front">앞</button
+            ><button data-view="side">옆</button
+            ><button data-view="top">위</button
+            ><button data-view="isometric">전체</button
+            ><label><input id="wire" type="checkbox" />와이어</label
+            ><label><input id="ground" type="checkbox" checked />격자</label>
+          </div>
+        </div>
+        <div id="viewport" role="region" aria-label="조각 화면">
+          <div id="webgl-error" hidden>
+            WebGL 2를 사용할 수 없습니다. 하드웨어 가속을 지원하는 브라우저에서
+            열어 주세요.
+          </div>
+          <div class="viewport-label">
+            <strong>STUDIO VIEW</strong><span id="mesh-count"></span>
+          </div>
+          <div id="cursor-help">
+            드래그로 조각 · Alt/오른쪽 드래그로 회전 · 휠로 확대 · Shift로
+            다듬기
+          </div>
+        </div>
+        <div class="view-status">
+          <span id="storage-status">브라우저 저장</span
+          ><output id="status" role="status"
+            >표면을 드래그해 조각을 시작하세요.</output
+          >
+        </div>
+      </main>
+      <aside>
+        <section>
+          <h1>브러시</h1>
+          <label
+            >반경 · m
+            <input
+              id="radius"
+              type="number"
+              min=".01"
+              max="2"
+              step=".001"
+              value=".25" /></label
+          ><input
+            id="radius-slider"
+            aria-label="브러시 반경"
+            type="range"
+            min=".01"
+            max="1"
+            step=".001"
+            value=".25"
+          /><label
+            >세기
+            <input
+              id="strength"
+              type="number"
+              min=".0001"
+              max=".2"
+              step=".0001"
+              value=".04" /></label
+          ><input
+            id="strength-slider"
+            aria-label="브러시 세기"
+            type="range"
+            min=".0001"
+            max=".2"
+            step=".0001"
+            value=".04"
+          /><label class="toggle"
+            ><input id="mirror" type="checkbox" />X축 대칭</label
+          >
+        </section>
+        <section>
+          <h2>메시</h2>
+          <button id="refine">세분화 · 형태 유지</button>
+          <p id="refine-hint">삼각형마다 정점을 추가합니다.</p>
+        </section>
+        <section>
+          <h2>재질</h2>
+          <label>색상<input id="color" type="color" value="#b99072" /></label
+          ><label
+            >거칠기<input
+              id="roughness"
+              type="number"
+              min="0"
+              max="1"
+              step=".01" /></label
+          ><label
+            >금속성<input
+              id="metalness"
+              type="number"
+              min="0"
+              max="1"
+              step=".01"
+          /></label>
+          <div class="swatches">
+            <button data-color="#b99072" aria-label="점토색"></button
+            ><button data-color="#c8d4dc" aria-label="밝은 회색"></button
+            ><button data-color="#496961" aria-label="녹색"></button
+            ><button data-color="#86526b" aria-label="자주색"></button>
+          </div>
+        </section>
+        <section>
+          <h2>정밀 변환</h2>
+          <div id="transforms"></div>
+        </section>
+        <section class="export">
+          <h2>내보내기</h2>
+          <button id="glb">GLB · 재질 포함</button
+          ><button id="stl">STL · mm</button>
+          <div>
+            <select id="png-size" aria-label="PNG 크기">
+              <option value="2048">2048 × 2048</option>
+              <option value="4096" selected>4096 × 4096</option>
+              <option value="1024">1024 × 1024</option></select
+            ><button id="png">PNG 저장</button>
+          </div>
+          <details>
+            <summary>파일과 단위 안내</summary>
+            <p>
+              GLB는 미터, STL은 밀리미터 좌표로 저장됩니다. 화면의
+              격자·바닥·조명은 3D 파일에 포함되지 않습니다. 프로젝트 JSON을
+              저장하면 다시 조각할 수 있습니다.
+            </p>
+            <p>
+              고해상도 모델은 파일로 보관하세요. 출력 전 3D 프린터용 도구에서
+              크기와 교차 면을 점검하세요.
+            </p>
+            <a href="assets/licenses/three.txt">Three.js · MIT</a> ·
+            <a href="assets/fonts/OFL.txt">글꼴 · OFL</a>
+          </details>
+        </section>
+      </aside>
+    </div>
+    <dialog id="new-dialog">
+      <form method="dialog">
+        <h2>새 조각</h2>
+        <label
+          >시작 형태<select id="shape">
+            <option value="sphere">구</option>
+            <option value="pebble">접힌 돌</option>
+          </select></label
+        ><label
+          >해상도<select id="quality">
+            <option value="low">8,066 정점</option>
+            <option value="medium" selected>32,258 정점</option>
+          </select></label
+        >
+        <p>현재 작업을 먼저 파일로 저장해 두세요.</p>
+        <div>
+          <button value="cancel">취소</button
+          ><button id="create" value="create">만들기</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
