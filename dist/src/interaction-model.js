@@ -18,6 +18,43 @@ export function objectDelta(dx,dy,axis,step,right,up){
   if(!vector(right)||!vector(up))throw Error('화면 방향을 확인하세요.');
   return right.map((value,i)=>(value*dx+up[i]*dy)*step);
 }
+const holdDistance=age=>{
+  const seconds=Math.max(0,(age-100)/1000),ramp=.15;
+  if(seconds>=ramp)return 20*(seconds-ramp/2);
+  const u=seconds/ramp;return 20*ramp*(u**3-u**4/2);
+};
+export class SmoothKeys{
+  constructor(){this.clear();}
+  get active(){return this.keys.size>0||this.target.some((v,i)=>v!==this.applied[i]);}
+  has(key){return this.keys.has(key);}
+  setFine(value){this.fine=!!value;}
+  press(command,now){
+    if(!finite(now)||now<0||!direction(command.key))throw Error('이동 입력을 확인하세요.');
+    this.setFine(command.fine);if(this.has(command.key))return false;
+    if(!this.active)this.last=now;
+    if(!this.keys.size)this.holdAge=0;
+    const delta=direction(command.key),factor=command.fine ? .1 : 1;
+    this.keys.set(command.key,delta);this.target=this.target.map((v,i)=>v+delta[i]*factor);this.releasedAge=0;return true;
+  }
+  release(key){this.keys.delete(key);if(!this.keys.size)this.releasedAge=0;}
+  tick(now){
+    if(!this.active)return [0,0];
+    if(!finite(now)||now<0)throw Error('이동 시간을 확인하세요.');
+    const dt=Math.min(50,Math.max(0,now-this.last));this.last=Math.max(now,this.last);
+    if(this.keys.size){
+      const direction=[0,0];for(const delta of this.keys.values())for(let i=0;i<2;i++)direction[i]+=delta[i];
+      const length=Math.hypot(...direction),amount=(holdDistance(this.holdAge+dt)-holdDistance(this.holdAge))*(this.fine ? .1 : 1);this.holdAge+=dt;
+      if(length)this.target=this.target.map((v,i)=>v+direction[i]/length*amount);
+    }else this.releasedAge+=dt;
+    const blend=-Math.expm1(-dt/40),delta=this.target.map((v,i)=>(v-this.applied[i])*blend);this.applied=this.applied.map((v,i)=>v+delta[i]);
+    if(!this.keys.size&&(this.releasedAge>=250||Math.hypot(...this.target.map((v,i)=>v-this.applied[i]))<1e-5)){
+      for(let i=0;i<2;i++)delta[i]+=this.target[i]-this.applied[i];this.clear();
+    }
+    return delta;
+  }
+  finish(){const delta=this.target.map((v,i)=>v-this.applied[i]);this.clear();return delta;}
+  clear(){this.keys=new Map();this.target=[0,0];this.applied=[0,0];this.last=0;this.holdAge=0;this.releasedAge=0;this.fine=false;}
+}
 export function translate(position,delta){
   if(!vector(position)||!position.every(v=>Math.abs(v)<=100)||!vector(delta))throw Error('이동 좌표를 확인하세요.');
   let fraction=1;

@@ -51,7 +51,7 @@
       <main>
         <div class="view-bar">
           <div>
-            <strong id="tool-name">객체 선택</strong><span>좌표 단위 m</span>
+            <strong id="tool-name">객체 선택</strong><span id="keyboard-mode">좌표 m · 방향키·WASD: 카메라 중심</span>
           </div>
           <div class="views">
             <button data-view="front">앞</button
@@ -64,7 +64,7 @@
         </div>
         <div id="move-options" class="move-strip" hidden>
           <div role="group" aria-label="객체 이동 방향"><button data-move-axis="screen" aria-pressed="true" title="C">화면</button><button data-move-axis="x" aria-pressed="false">X</button><button data-move-axis="y" aria-pressed="false">Y</button><button data-move-axis="z" aria-pressed="false">Z</button></div>
-          <label>키보드 간격 · m<input id="move-step" type="number" min=".0001" max="10" step=".0001" value=".01"></label><small>Shift: 1/10 · Esc: 이동 취소</small>
+          <label>키보드 간격 · m<input id="move-step" type="number" min=".0001" max="10" step=".0001" value=".01"></label><button id="camera-mode">카메라 이동 · V</button><small>길게 누르면 연속 이동 · Shift: 1/10 · Esc: 취소</small>
         </div>
         <div id="viewport" role="region" aria-label="조각 화면">
           <div id="webgl-error" hidden>
@@ -75,7 +75,7 @@
             <strong>STUDIO VIEW</strong><span id="mesh-count"></span><span id="selected-object" class="selection-badge" aria-live="polite"></span>
           </div>
           <div id="cursor-help">
-            클릭 선택 · 방향키·WASD 화면 이동 · G 객체 이동 · 오른쪽 드래그 회전
+            클릭 선택 · 방향키·WASD 카메라 이동 · G 객체 이동 · 오른쪽 드래그 회전
           </div>
         </div>
         <div class="view-status">

@@ -1,5 +1,13 @@
 # Verification
 
+## 2026-10-10 부드러운 키 이동과 모드 복귀 — LOCAL
+
+- SOURCE VERIFIED: 이번 변경의 architecture/requirements/README/decisions, app·interaction model·관련 테스트·index/객체 CSS, viewport와 check/serve/normalize/workflow를 확인했습니다. 기존 geometry/cut/worker와 다른 앱의 모든 코드 재검토는 PARTIAL입니다. D07에 입력 시간·완료·취소·저장 경계를 기록했습니다.
+- LOCAL: 27/27 tests, 17 public files 정적 검사와 git diff --check PASS. 새 순수 모델은 정밀 탭의 정확한 최종 간격, OS 반복 중복 방지, 30/60/144 FPS 동일 적분 거리, 연속 대각선 정규화/반대키 상쇄, Shift 전환, 50ms 지연 상한, 완료 flush와 취소를 검사합니다. 이는 모든 실제 GPU의 프레임률 검증은 아닙니다.
+- ACTUAL BROWSER: 카메라/객체 각각 실제 700ms 입력 중 43프레임·43개 서로 다른 중간 위치를 관찰했습니다. 키를 놓은 후 정지, Shift 0.00001m 탭, 한 번의 undo/redo, Esc 객체 취소, 누른 키가 있는 상태의 V 복귀, G 양방향 전환과 직접 카메라 버튼을 확인했습니다. 이동 전후 메시 좌표가 같으며 프레임마다 자동 저장하지 않습니다. 실제 입력창/대화상자·blur·Alt 보호, 2객체 클릭 선택·마우스 드래그/undo와 이동 중 실제 JSON 다운로드의 완료 처리도 통과했습니다.
+- LAYOUT / PREVIEW: 실제 1440/390/320px에서 root overflow0, 카메라 버튼이 화면 안에 있습니다. 작은 화면 PNG와 WEB LAB용 실제 1440×1000 JPEG를 시각 검토했습니다. 관찰한 page errors0. 캡처/다운로드/QA는 ignored output/playwright/2026-10-10-smooth에 보관합니다.
+- NOT_RUN: 물리 키보드 지연·펜·터치/모든 GPU·브라우저, 외부 CAD와 전체 내보내기 형식의 재검증은 이번 범위가 아닙니다. 이전 4K PNG/GLB/STL 검증과 이번 JSON 동작 검증은 구분합니다. REMOTE_CI/LIVE는 별도로 확인합니다.
+
 ## 2026-10-10 선택·카메라·객체 이동 — LOCAL
 
 - SOURCE VERIFIED: 이번 변경의 architecture/requirements/README/decisions, app/viewport/scene 및 새 interaction model, UI/CSS, pinned vendor entry/build/check·workflow와 관련 테스트를 읽었습니다. 기존 geometry/cut/worker의 모든 함수를 이번에 다시 검토한 것은 아닙니다(PARTIAL); 기존 테스트는 함께 실행했습니다. D06에 입력·표시·저장 경계를 기록했습니다.

@@ -7,7 +7,7 @@ import {
 import {project,active,validate,encode,parse,totals,bounds,volume,closed,addObject,duplicate,removeObject,resizeVolume,mergeObjects,acceptSplit,History} from './scene-model.js';
 import {normalVector} from './cut-model.js';
 import { Viewport } from "./viewport.js";
-import {BRUSH_TOOLS,motionCommand,objectDelta,translate,SELECTION_DEFAULTS} from './interaction-model.js';
+import {BRUSH_TOOLS,motionCommand,objectDelta,translate,SELECTION_DEFAULTS,SmoothKeys} from './interaction-model.js';
 const $ = (id) => document.getElementById(id),
   status = (s) => ($("status").textContent = s),
   history = new History();
@@ -20,9 +20,9 @@ let scene = project("pebble", innerWidth > 680),p=active(scene),
   brush = { radius: 0.25, strength: 0.04, mirror: false },
   stroke = null,
   alt = false,
-  exporting = false,job=null,movement=null,moveAxis='screen',moveStep=.01;
+  exporting = false,job=null,movement=null,moveAxis='screen',moveStep=.01,keyboardKind=null,keyboardFrame=0;
 const marked=new Set();
-const moveKeys=new Set();
+const keyboardMotion=new SmoothKeys();
 try {
   const raw = localStorage.getItem(KEY);
   if (raw) {scene = parse(raw);p=active(scene);}
@@ -164,7 +164,8 @@ function tool(value) {
   };
   $("tool-name").textContent = names[value];
   $('move-options').hidden=value!=='move';
-  $('cursor-help').textContent=value==='move'?'드래그·방향키·WASD로 객체 이동 · Shift 정밀 · X/Y/Z 축 고정 · Esc 취소':'클릭 선택 · 방향키·WASD 화면 이동 · G 객체 이동 · 오른쪽 드래그 회전';
+  $('keyboard-mode').textContent='좌표 m · 방향키·WASD: '+(value==='move'?'선택 객체':'카메라 중심');
+  $('cursor-help').textContent=value==='move'?'드래그·방향키·WASD로 객체 이동 · Shift 정밀 · V 카메라 이동 · Esc 취소':'클릭 선택 · 방향키·WASD 카메라 이동 · G 객체 이동 · 오른쪽 드래그 회전';
   document
     .querySelectorAll("[data-tool]")
     .forEach((b) => b.setAttribute("aria-pressed", b.dataset.tool === mode));
@@ -269,13 +270,27 @@ function moveObject(delta){
   if($('show-plane').checked)previewPlane();
 }
 function endMovement(cancel=false){
-  moveKeys.clear();if(!movement)return;
+  const remaining=keyboardMotion.finish();if(!cancel)applyKeyboardDelta(remaining);cancelAnimationFrame(keyboardFrame);keyboardFrame=0;keyboardKind=null;$('viewport').dataset.keyboardMoving='false';
+  if(!movement)return;
   const finished=movement;movement=null;
   if(cancel){scene=finished.before;rebuild();status('이동을 취소했습니다.');}
   else if(finished.changed){try{validate(scene);history.push(finished.before);save();render();status('객체를 이동했습니다.');}catch(e){scene=finished.before;rebuild();status(e.message);}}
   view?.holdSelection(false);if(view)view.controls.enabled=true;controls();
 }
+function applyKeyboardDelta([dx,dy]){
+  if(!view||(!dx&&!dy)||!keyboardKind)return;
+  if(keyboardKind==='camera')view.pan(dx*.25,dy*.25);
+  else{const {right,up}=view.basis();moveObject(objectDelta(dx,dy,moveAxis,moveStep,right,up));}
+}
+function animateKeyboard(now){
+  keyboardFrame=0;if(!keyboardKind)return;
+  const focused=document.activeElement===view?.canvas||document.activeElement===document.body;
+  if(!focused||document.hidden||document.querySelector('dialog[open]')||job||exporting||stroke||alt){endMovement();return;}
+  applyKeyboardDelta(keyboardMotion.tick(now));
+  if(keyboardMotion.active)keyboardFrame=requestAnimationFrame(animateKeyboard);else endMovement();
+}
 function setMoveAxis(axis){endMovement();moveAxis=axis;document.querySelectorAll('[data-move-axis]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.moveAxis===axis));}
+$('camera-mode').onclick=()=>{tool('select');view?.canvas.focus({preventScroll:true});};
 document.querySelectorAll('[data-move-axis]').forEach(b=>b.onclick=()=>{setMoveAxis(b.dataset.moveAxis);view?.canvas.focus({preventScroll:true});});
 $('move-step').onchange=()=>{const value=Number($('move-step').value);if(!Number.isFinite(value)||value<.0001||value>10){$('move-step').value=moveStep;status('이동 간격은 0.0001–10m입니다.');return;}endMovement();moveStep=value;};
 $('selection-mode').value=SELECTION_DEFAULTS.mode;$('selection-width').value=SELECTION_DEFAULTS.width;$('selection-opacity').value=SELECTION_DEFAULTS.opacity;
@@ -285,6 +300,7 @@ for(const id of ['selection-mode','selection-width','selection-opacity']){
 }
 if (view) {
   view.canvas.addEventListener("pointerdown", (e) => {
+    if(keyboardKind)endMovement();
     view.canvas.focus({preventScroll:true});
     if (e.button !== 0 || mode === "view"||mode==='pan' || alt || exporting||job||stroke||movement||e.isPrimary===false) return;
     const hit = view.pick(e.clientX, e.clientY);
@@ -445,6 +461,7 @@ for (const kind of ["glb", "stl", "png"])
   };
 document.addEventListener("keydown", (e) => {
   if (e.target.closest("input,select,textarea,[contenteditable]:not([contenteditable=false])")||document.querySelector('dialog[open]')||e.isComposing) return;
+  if(e.ctrlKey||e.metaKey||e.altKey)endMovement();
   if (e.key === "Alt") {
     alt = true;
     controls();
@@ -459,24 +476,24 @@ document.addEventListener("keydown", (e) => {
   }
   const focused=document.activeElement===view?.canvas||document.activeElement===document.body;
   if(!view||!focused||job||exporting||stroke)return;
-  if(e.key==='Escape'&&movement){e.preventDefault();endMovement(true);return;}
+  if(e.key==='Escape'&&(movement||keyboardKind)){e.preventDefault();endMovement(true);return;}
   if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat){
-    const key=e.key.toLowerCase();if(key==='g'||key==='v'){e.preventDefault();tool(key==='g'?'move':'select');return;}
+    const key=e.key.toLowerCase();if(key==='g'||key==='v'){e.preventDefault();tool(key==='g'&&mode!=='move'?'move':'select');return;}
     if(key==='f'){e.preventDefault();endMovement();view.view('isometric',false);return;}
     if(mode==='move'&&['x','y','z','c'].includes(key)){e.preventDefault();setMoveAxis(key==='c'?'screen':key);return;}
   }
+  if(keyboardKind)keyboardMotion.setFine(e.shiftKey);
   const command=motionCommand(e,{mode,focused});if(!command)return;e.preventDefault();
-  if(command.kind==='camera'){view.cursor(null,brush.radius);view.pan(command.dx*.25*(command.fine ? .1 : 1),command.dy*.25*(command.fine ? .1 : 1));return;}
-  if(movement?.kind==='pointer')return;
-  if(!movement)beginMovement('keyboard');moveKeys.add(command.key);
-  const {right,up}=view.basis(),delta=objectDelta(command.dx,command.dy,moveAxis,moveStep,right,up).map(v=>v*(command.fine ? .1 : 1));moveObject(delta);
+  if(e.repeat||movement?.kind==='pointer')return;
+  if(!keyboardKind){if(command.kind==='object'&&!beginMovement('keyboard'))return;keyboardKind=command.kind;view.cursor(null,brush.radius);$('viewport').dataset.keyboardMoving='true';}
+  keyboardMotion.press(command,performance.now());if(!keyboardFrame)keyboardFrame=requestAnimationFrame(animateKeyboard);
 });
 document.addEventListener("keyup", (e) => {
   if (e.key === "Alt") {
     alt = false;
     controls();
   }
-  const key=e.key.length===1?e.key.toLowerCase():e.key;moveKeys.delete(key);if(movement?.kind==='keyboard'&&!moveKeys.size)endMovement();
+  const key=e.key.length===1?e.key.toLowerCase():e.key;if(keyboardMotion.has(key)){applyKeyboardDelta(keyboardMotion.tick(performance.now()));keyboardMotion.release(key);}if(keyboardKind)keyboardMotion.setFine(e.shiftKey);
 });
 window.addEventListener("blur", () => {
   alt = false;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {direction,motionCommand,objectDelta,translate,boxEdges,SELECTION_DEFAULTS,validateSelection,selectionVisible} from '../dist/src/interaction-model.js';
+import {direction,motionCommand,objectDelta,translate,boxEdges,SELECTION_DEFAULTS,validateSelection,selectionVisible,SmoothKeys} from '../dist/src/interaction-model.js';
 import {project,active,encode,parse,History} from '../dist/src/scene-model.js';
 
 test('arrows and WASD route to camera by default and objects only in explicit move mode',()=>{
@@ -44,4 +44,27 @@ test('reusable box buffer contains exactly twelve distinct edges and finite boun
   const min=[-1,-2,-3],max=[1,2,3],edges=boxEdges(min,max),unique=new Set();assert.equal(edges.length,72);
   for(let i=0;i<72;i+=6){const a=edges.slice(i,i+3),b=edges.slice(i+3,i+6);assert.equal(a.filter((v,k)=>v!==b[k]).length,1);for(const v of [a,b])v.forEach((n,k)=>assert(n===min[k]||n===max[k]));unique.add([a.join(','),b.join(',')].sort().join('|'));}
   assert.equal(unique.size,12);assert.throws(()=>boxEdges([1,0,0],[0,0,0]));assert.throws(()=>boxEdges([Infinity,0,0],max));
+});
+const command=(key='ArrowRight',fine=false)=>motionCommand({key,shiftKey:fine},{mode:'move'});
+const settle=(motion,start=0)=>{const sum=[0,0];for(let now=start+10;motion.active&&now<=start+1000;now+=10){const d=motion.tick(now);d.forEach((v,i)=>sum[i]+=v);}assert(!motion.active);return sum;};
+test('short taps animate fractionally and settle to the exact normal or Shift step',()=>{
+  for(const fine of [false,true]){const keys=new SmoothKeys();keys.press(command('d',fine),0);keys.release('d');const first=keys.tick(16);assert(first[0]>0&&first[0]<(fine?.1:1));const rest=settle(keys,16);assert(Math.abs(first[0]+rest[0]-(fine?.1:1))<1e-14);assert.equal(first[1]+rest[1],0);assert.deepEqual(keys.tick(1000),[0,0]);}
+});
+test('held movement is elapsed-time based across 30/60/144 FPS rather than OS repeats',()=>{
+  const distances=[];for(const fps of [30,60,144]){const keys=new SmoothKeys(),sum=[0,0];keys.press(command(),0);for(let frame=1;frame<=fps;frame++){const delta=keys.tick(frame*1000/fps);delta.forEach((v,i)=>sum[i]+=v);}keys.release('ArrowRight');const tail=settle(keys,1000);distances.push(sum[0]+tail[0]);assert.equal(sum[1]+tail[1],0);}
+  assert(distances.every(v=>Math.abs(v-distances[0])<1e-12));assert(Math.abs(distances[0]-17.5)<1e-12);
+  const keys=new SmoothKeys();keys.press(command(),0);for(let repeat=0;repeat<20;repeat++)assert.equal(keys.press(command(),0),false);keys.release('ArrowRight');assert(Math.abs(settle(keys)[0]-1)<1e-14);
+});
+test('continuous diagonal speed is normalized and opposite directions cancel',()=>{
+  const straight=new SmoothKeys(),diagonal=new SmoothKeys(),opposite=new SmoothKeys();straight.press(command('d'),0);diagonal.press(command('d'),0);diagonal.press(command('w'),0);opposite.press(command('d'),0);opposite.press(command('a'),0);
+  for(let now=10;now<=1000;now+=10){straight.tick(now);diagonal.tick(now);assert.deepEqual(opposite.tick(now),[0,0]);}
+  assert(Math.abs(diagonal.target[0]-1-(straight.target[0]-1)/Math.SQRT2)<1e-12);assert(Math.abs(diagonal.target[1]-diagonal.target[0])<1e-12);
+});
+test('Shift changes future held speed without a positional jump; suspension delta is capped',()=>{
+  const keys=new SmoothKeys();keys.press(command(),0);for(let now=10;now<=500;now+=10)keys.tick(now);const before=[...keys.applied];keys.setFine(true);assert.deepEqual(keys.applied,before);const target=[...keys.target];keys.tick(550);assert(Math.abs(keys.target[0]-target[0]-.1)<1e-12);
+  const old=[...keys.target];keys.tick(100000);assert(Math.abs(keys.target[0]-old[0]-.1)<1e-12);assert.throws(()=>keys.tick(Infinity));
+});
+test('finish flushes only the pending tap and clear cancels every future frame',()=>{
+  const keys=new SmoothKeys();keys.press(command(),0);const frame=keys.tick(16),rest=keys.finish();assert(Math.abs(frame[0]+rest[0]-1)<1e-14);assert(!keys.active);assert.deepEqual(keys.tick(1000),[0,0]);
+  keys.press(command('w'),1000);keys.tick(1016);keys.clear();assert(!keys.active);assert.deepEqual(keys.finish(),[0,0]);assert.deepEqual(keys.tick(2000),[0,0]);assert.throws(()=>keys.press({key:'invalid'},2000));
 });
