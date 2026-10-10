@@ -3,7 +3,11 @@ import {
   OrbitControls,
   GLTFExporter,
   STLExporter,
+  LineSegments2,
+  LineSegmentsGeometry,
+  LineMaterial,
 } from "../vendor/sculpt.js";
+import {SELECTION_DEFAULTS,validateSelection,selectionVisible,boxEdges} from './interaction-model.js';
 export class Viewport {
   constructor(host, project) {
     this.host = host;
@@ -23,7 +27,7 @@ export class Viewport {
     this.canvas.tabIndex = 0;
     this.canvas.setAttribute(
       "aria-label",
-      "3D 조각 화면. 보기 도구에서 드래그로 회전, 휠로 확대",
+      "3D 조각 화면. 클릭 선택. 방향키나 WASD로 카메라 이동. G로 객체 이동, V로 선택.",
     );
     this.camera = new THREE.PerspectiveCamera(38, 1, 0.01, 1000);
     this.camera.position.set(3, 1.7, 4);
@@ -72,6 +76,10 @@ export class Viewport {
     this.ring.renderOrder = 10;
     this.scene.add(this.ring);
     this.ray = new THREE.Raycaster();
+    this.selectionPrefs={...SELECTION_DEFAULTS};
+    this.selectionUntil=0;
+    this.selectionActive=false;
+    this.pngExporting=false;
     this.setProject(project);
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
@@ -85,7 +93,33 @@ export class Viewport {
     this.updateTransform();
     this.render();
   }
-  setActiveObject(id){this.mesh=this.objectMeshes.get(id);if(this.selection){this.scene.remove(this.selection);this.selection.geometry.dispose();this.selection.material.dispose();}this.selection=new THREE.BoxHelper(this.mesh,'#b88b54');this.scene.add(this.selection);this.render();}
+  setActiveObject(id){
+    this.mesh=this.objectMeshes.get(id);
+    if(!this.selection){
+      const geometry=new LineSegmentsGeometry().setPositions(Array(72).fill(0)),material=new LineMaterial({color:'#75685c',linewidth:this.selectionPrefs.width,worldUnits:false,transparent:true,opacity:this.selectionPrefs.opacity,depthWrite:false,depthTest:false,toneMapped:false});
+      this.selection=new LineSegments2(geometry,material);this.selection.renderOrder=5;this.selection.frustumCulled=false;
+      this.selection.update=()=>this.updateSelectionGeometry();this.scene.add(this.selection);
+    }
+    this.updateSelectionGeometry();this.applySelectionVisibility();this.render();
+  }
+  updateSelectionGeometry(){
+    if(!this.mesh||!this.selection)return;
+    this.mesh.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(this.mesh),data=this.selection.geometry.attributes.instanceStart.data;
+    data.array.set(boxEdges(box.min.toArray(),box.max.toArray()));data.needsUpdate=true;
+    this.selection.geometry.computeBoundingBox();this.selection.geometry.computeBoundingSphere();
+  }
+  applySelectionVisibility(){
+    this.selection.visible=selectionVisible(this.selectionPrefs,this.selectionActive,this.selectionUntil,performance.now(),this.pngExporting);
+    this.host.dataset.selectionVisible=String(this.selection.visible);
+  }
+  setSelection(prefs){
+    this.selectionPrefs=validateSelection(prefs);this.selection.material.linewidth=prefs.width;this.selection.material.opacity=prefs.opacity;this.applySelectionVisibility();this.render();
+  }
+  flashSelection(milliseconds=900){
+    clearTimeout(this.selectionTimer);this.selectionUntil=performance.now()+milliseconds;this.applySelectionVisibility();this.render();
+    this.selectionTimer=setTimeout(()=>{this.applySelectionVisibility();this.render();},milliseconds+10);
+  }
+  holdSelection(active){this.selectionActive=active;if(active){this.applySelectionVisibility();this.render();}else this.flashSelection();}
   updateTransform() {
     const p = this.project;
     for(const object of p.objects){const mesh=this.objectMeshes.get(object.id);mesh.position.fromArray(object.transform.position);mesh.rotation.set(...object.transform.rotation.map(x=>x*Math.PI/180));mesh.scale.fromArray(object.transform.scale);mesh.material.color.set(object.material.color);mesh.material.roughness=object.material.roughness;mesh.material.metalness=object.material.metalness;mesh.name=object.title;mesh.updateMatrixWorld(true);}
@@ -172,6 +206,20 @@ export class Viewport {
   }
   target(values){if(!values.every(v=>Number.isFinite(v)&&Math.abs(v)<=100))throw Error('카메라 중심은 ±100m 범위입니다.');const next=new THREE.Vector3(...values),delta=next.clone().sub(this.controls.target);this.camera.position.add(delta);this.controls.target.copy(next);this.controls.update();this.render();}
   pan(dx,dy){const right=new THREE.Vector3(1,0,0).applyQuaternion(this.camera.quaternion),up=new THREE.Vector3(0,1,0).applyQuaternion(this.camera.quaternion),distance=this.camera.position.distanceTo(this.controls.target)*.08,delta=right.multiplyScalar(dx*distance).add(up.multiplyScalar(dy*distance));this.target(this.controls.target.clone().add(delta).toArray().map(v=>Math.max(-100,Math.min(100,v))));}
+  basis(){return {right:new THREE.Vector3(1,0,0).applyQuaternion(this.camera.quaternion).toArray(),up:new THREE.Vector3(0,1,0).applyQuaternion(this.camera.quaternion).toArray()};}
+  beginObjectDrag(x,y,point,axis){
+    const rect=this.canvas.getBoundingClientRect(),normal=this.camera.getWorldDirection(new THREE.Vector3()),distance=Math.abs(point.clone().sub(this.camera.position).dot(normal)),unitsPerPixel=2*Math.tan(this.camera.fov*Math.PI/360)*distance/rect.height;
+    const frame={x,y,axis,plane:new THREE.Plane().setFromNormalAndCoplanarPoint(normal,point),origin:point.clone(),unitsPerPixel};
+    if(axis!=='screen'){const direction=new THREE.Vector3();direction.setComponent('xyz'.indexOf(axis),1);const a=point.clone().project(this.camera),b=point.clone().add(direction).project(this.camera);frame.projected=[(b.x-a.x)*rect.width/2,-(b.y-a.y)*rect.height/2];}
+    return frame;
+  }
+  objectDragDelta(frame,x,y){
+    if(frame.axis!=='screen'){
+      const [ax,ay]=frame.projected,length=ax*ax+ay*ay,amount=length>4?((x-frame.x)*ax+(y-frame.y)*ay)/length:-(y-frame.y)*frame.unitsPerPixel,delta=[0,0,0];delta['xyz'.indexOf(frame.axis)]=amount;return delta;
+    }
+    const rect=this.canvas.getBoundingClientRect();this.ray.setFromCamera(new THREE.Vector2((x-rect.left)/rect.width*2-1,-(y-rect.top)/rect.height*2+1),this.camera);
+    const hit=this.ray.ray.intersectPlane(frame.plane,new THREE.Vector3());return hit?hit.sub(frame.origin).toArray():null;
+  }
   cutPlane(normal,offset,visible){if(this.cutHelper){this.scene.remove(this.cutHelper);this.cutHelper.geometry.dispose();this.cutHelper.material.dispose();this.cutHelper=null;}if(visible){const n=new THREE.Vector3(...normal).normalize(),box=new THREE.Box3().setFromObject(this.mesh),center=box.getCenter(new THREE.Vector3()),size=Math.max(box.getSize(new THREE.Vector3()).length()*1.2,.1);center.add(n.clone().multiplyScalar(offset-center.dot(n)));const mesh=new THREE.Mesh(new THREE.PlaneGeometry(size,size),new THREE.MeshBasicMaterial({color:'#347eb1',transparent:true,opacity:.18,side:THREE.DoubleSide,depthWrite:false}));mesh.position.copy(center);mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),n);this.cutHelper=mesh;this.scene.add(mesh);}this.render();}
   async glb() {
     const mesh = this.group.clone(true);
@@ -205,8 +253,9 @@ export class Viewport {
     const oldSize = this.renderer.getSize(new THREE.Vector2()),
       oldRatio = this.renderer.getPixelRatio(),
       aspect = this.camera.aspect,
-      ring = this.ring.visible,selection=this.selection.visible,cut=this.cutHelper?.visible;
+      ring = this.ring.visible,cut=this.cutHelper?.visible;
     try {
+      this.pngExporting=true;
       this.ring.visible = false;
       this.selection.visible=false;if(this.cutHelper)this.cutHelper.visible=false;
       this.renderer.setPixelRatio(1);
@@ -221,7 +270,7 @@ export class Viewport {
       return blob;
     } finally {
       this.ring.visible = ring;
-      this.selection.visible=selection;if(this.cutHelper)this.cutHelper.visible=cut;
+      this.pngExporting=false;this.applySelectionVisibility();if(this.cutHelper)this.cutHelper.visible=cut;
       this.renderer.setPixelRatio(oldRatio);
       this.renderer.setSize(oldSize.x, oldSize.y, false);
       this.camera.aspect = aspect;

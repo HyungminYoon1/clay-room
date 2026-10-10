@@ -1,5 +1,14 @@
 # Verification
 
+## 2026-10-10 선택·카메라·객체 이동 — LOCAL
+
+- SOURCE VERIFIED: 이번 변경의 architecture/requirements/README/decisions, app/viewport/scene 및 새 interaction model, UI/CSS, pinned vendor entry/build/check·workflow와 관련 테스트를 읽었습니다. 기존 geometry/cut/worker의 모든 함수를 이번에 다시 검토한 것은 아닙니다(PARTIAL); 기존 테스트는 함께 실행했습니다. D06에 입력·표시·저장 경계를 기록했습니다.
+- LOCAL: 22/22 tests, 17 public files 정적 검사, git diff --check PASS. 기본 카메라/객체 모드 분리, 글 입력·대화상자·조합 입력/수정키 보호, 정밀 간격, 방향을 보존하는 ±100m 경계, transform-only 이동과 한 번의 undo, 유한한 선택 설정·12개 선분 버퍼를 검사했습니다.
+- ACTUAL BROWSER: 2객체 실제 클릭 선택, 다른 객체에 브러시 첫 클릭 시 변형 없음, 기본 방향키/WASD 카메라 이동, X축 0.4535152434m 드래그·화면 평면 드래그·앞 보기에서 깊이 축 이동, 0.0001m 간격의 키 반복·Shift 0.00001m, 한 번의 undo/redo, 키/마우스 Escape 취소·blur 확정, 입력창/열린 대화상자 보호를 확인했습니다. 이동 전후 메시 좌표 hash는 같습니다. 기존 선택 객체의 실제 브러시 변형과 undo도 확인했습니다.
+- SELECTION / EXPORT: 기본 900ms 후 숨김·조작 중 유지, 항상/숨김 및 숨겨도 남는 이름·목록을 확인했습니다. 0.25px/3px 굵기와 농도는 실제 canvas 캡처가 달라집니다. 항상/숨김 상태에서 내려받은 1024 PNG bytes가 같아 테두리가 출력되지 않습니다. 실제 4096×4096 PNG 2,003,101bytes를 확인·시각 검토했습니다. 내려받은 2mesh GLB의 16132정점과 world 변환이 프로젝트와 일치하며 STL 32256삼각형의 mm bounds가 1e-6m 이내로 일치합니다.
+- STORAGE / LAYOUT: 별도 기존 v1 저장 fixture는 자동 열기·카메라 이동으로 원본 bytes를 바꾸지 않습니다. 명시적 객체 이동만 v2로 저장하며 undo로 옛 좌표를 복구했습니다. 다른 앱 QA key를 유지합니다. 실제 1440/390/320px에서 root overflow와 관찰한 page errors0, 이동 메뉴·선택 설정이 화면 안에 있습니다. WEB LAB용 실제 1440×1000 JPEG를 갱신합니다.
+- QA / NOT_RUN: CLI의 range fill은 0.1 형식으로 수정했고 파일 열기 confirm은 별도 UI 명령으로 처리했습니다. 비동기 dialog close 뒤에는 실제 객체 상태를 기다려 테스트 입력 경합을 제거했습니다. 자동 v1 열기와 사용자가 승인하는 파일 교체는 구분합니다. 캡처/다운로드/검사기는 ignored output/playwright/2026-10-10-controls에 있습니다. 물리 펜·터치, 모든 GPU/브라우저와 외부 CAD/프린터 검증은 NOT_RUN; REMOTE_CI/LIVE는 별도 확인합니다.
+
 ## 2026-10-10 승인된 다중 객체 구조 — LOCAL
 
 - SOURCE VERIFIED: architecture/requirements/README/decisions와 조각·파일·viewport·모델·작업자·분할·테스트를 검토했습니다. 사용자가 기존 한 객체 제한을 다중 객체로 바꾸는 것을 명시적으로 승인했습니다. D05에 대안/범위/이유를 기록했습니다. Three 0.186.1의 로컬 메시/OrbitControls를 유지하고 Earcut 3.0.2 단면 triangulation을 로컬 번들·ISC 라이선스와 함께 추가했습니다.

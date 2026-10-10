@@ -7,6 +7,7 @@ import {
 import {project,active,validate,encode,parse,totals,bounds,volume,closed,addObject,duplicate,removeObject,resizeVolume,mergeObjects,acceptSplit,History} from './scene-model.js';
 import {normalVector} from './cut-model.js';
 import { Viewport } from "./viewport.js";
+import {BRUSH_TOOLS,motionCommand,objectDelta,translate,SELECTION_DEFAULTS} from './interaction-model.js';
 const $ = (id) => document.getElementById(id),
   status = (s) => ($("status").textContent = s),
   history = new History();
@@ -15,12 +16,13 @@ let scene = project("pebble", innerWidth > 680),p=active(scene),
   dirty = false,
   view,
   neighbors,
-  mode = "add",
+  mode = "select",
   brush = { radius: 0.25, strength: 0.04, mirror: false },
   stroke = null,
   alt = false,
-  exporting = false,job=null;
+  exporting = false,job=null,movement=null,moveAxis='screen',moveStep=.01;
 const marked=new Set();
+const moveKeys=new Set();
 try {
   const raw = localStorage.getItem(KEY);
   if (raw) {scene = parse(raw);p=active(scene);}
@@ -60,6 +62,7 @@ function rebuild() {
 }
 function render() {
   $("title").value = p.title;
+  const selected='선택 · '+p.title;if($('selected-object').textContent!==selected)$('selected-object').textContent=selected;
   $("color").value = p.material.color;
   $("roughness").value = p.material.roughness;
   $("metalness").value = p.material.metalness;
@@ -83,6 +86,7 @@ function render() {
 function change(fn) {
   if(job||exporting){status('진행 중인 작업을 마친 뒤 편집하세요.');return false;}
   if (stroke) endStroke();
+  endMovement();
   const before = structuredClone(scene);
   try {
     fn();
@@ -144,13 +148,14 @@ function controls() {
   view.controls.mouseButtons.LEFT = mode==='pan'?2:mode === "view" || alt ? 0 : null;
   view.controls.mouseButtons.RIGHT = 0;
   view.controls.touches.ONE = mode==='pan'?1:mode === "view" ? 0 : null;
-  view.canvas.style.cursor = mode === "view"||mode==='pan' || alt ? "grab" : mode==='select'?'pointer':"crosshair";
+  view.canvas.style.cursor = mode === "view"||mode==='pan' || alt ? "grab" : mode==='move'?(movement?'grabbing':'grab'):mode==='select'?'pointer':"crosshair";
 }
 function tool(value) {
+  endStroke();endMovement();
   mode = value;
   const names = {
     view: "보기",
-    pan:'중심 이동',select:'객체 선택',
+    pan:'중심 이동',select:'객체 선택',move:'객체 이동',
     add: "밀기 브러시",
     subtract: "깎기 브러시",
     smooth: "다듬기 브러시",
@@ -158,14 +163,17 @@ function tool(value) {
     crease: "주름 브러시",
   };
   $("tool-name").textContent = names[value];
+  $('move-options').hidden=value!=='move';
+  $('cursor-help').textContent=value==='move'?'드래그·방향키·WASD로 객체 이동 · Shift 정밀 · X/Y/Z 축 고정 · Esc 취소':'클릭 선택 · 방향키·WASD 화면 이동 · G 객체 이동 · 오른쪽 드래그 회전';
   document
     .querySelectorAll("[data-tool]")
     .forEach((b) => b.setAttribute("aria-pressed", b.dataset.tool === mode));
   controls();
+  view?.cursor(null,brush.radius);
 }
 document
   .querySelectorAll("[data-tool]")
-  .forEach((b) => (b.onclick = () => tool(b.dataset.tool)));
+  .forEach((b) => (b.onclick = () => {tool(b.dataset.tool);view?.canvas.focus({preventScroll:true});}));
 document
   .querySelectorAll("[data-view]")
   .forEach((b) => (b.onclick = () => view?.view(b.dataset.view)));
@@ -231,6 +239,7 @@ function endStroke() {
   if (!stroke) return;
   const s = stroke;
   stroke = null;
+  view?.holdSelection(false);
   if (s.changed) {
     try {
       validate(scene);
@@ -246,15 +255,47 @@ function endStroke() {
   }
   controls();
 }
+function beginMovement(kind,frame=null){
+  if(movement||stroke||job||exporting||!view)return false;
+  movement={kind,frame,before:structuredClone(scene),changed:false,raw:[0,0,0],dragged:false};
+  view.holdSelection(true);view.cursor(null,brush.radius);return true;
+}
+function moveObject(delta){
+  if(!movement)return;
+  const next=translate(p.transform.position,delta);
+  if(next.every((v,i)=>v===p.transform.position[i]))return;
+  p.transform.position=next;movement.changed=true;
+  view.updateTransform();for(let i=0;i<3;i++)$('position'+i).value=next[i];
+  if($('show-plane').checked)previewPlane();
+}
+function endMovement(cancel=false){
+  moveKeys.clear();if(!movement)return;
+  const finished=movement;movement=null;
+  if(cancel){scene=finished.before;rebuild();status('이동을 취소했습니다.');}
+  else if(finished.changed){try{validate(scene);history.push(finished.before);save();render();status('객체를 이동했습니다.');}catch(e){scene=finished.before;rebuild();status(e.message);}}
+  view?.holdSelection(false);if(view)view.controls.enabled=true;controls();
+}
+function setMoveAxis(axis){endMovement();moveAxis=axis;document.querySelectorAll('[data-move-axis]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.moveAxis===axis));}
+document.querySelectorAll('[data-move-axis]').forEach(b=>b.onclick=()=>{setMoveAxis(b.dataset.moveAxis);view?.canvas.focus({preventScroll:true});});
+$('move-step').onchange=()=>{const value=Number($('move-step').value);if(!Number.isFinite(value)||value<.0001||value>10){$('move-step').value=moveStep;status('이동 간격은 0.0001–10m입니다.');return;}endMovement();moveStep=value;};
+$('selection-mode').value=SELECTION_DEFAULTS.mode;$('selection-width').value=SELECTION_DEFAULTS.width;$('selection-opacity').value=SELECTION_DEFAULTS.opacity;
+for(const id of ['selection-mode','selection-width','selection-opacity']){
+  const apply=()=>{try{view?.setSelection({mode:$('selection-mode').value,width:Number($('selection-width').value),opacity:Number($('selection-opacity').value)});}catch(e){status(e.message);}};
+  $(id).addEventListener(id==='selection-opacity'?'input':'change',apply);
+}
 if (view) {
   view.canvas.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 || mode === "view"||mode==='pan' || alt || exporting||job) return;
+    view.canvas.focus({preventScroll:true});
+    if (e.button !== 0 || mode === "view"||mode==='pan' || alt || exporting||job||stroke||movement||e.isPrimary===false) return;
     const hit = view.pick(e.clientX, e.clientY);
     if (!hit) return;
-    if(hit.objectId!==p.id)selectObject(hit.objectId);
-    if(mode==='select')return;
+    const other=hit.objectId!==p.id;if(other)selectObject(hit.objectId);else view.flashSelection();
+    if(mode==='select'||(other&&BRUSH_TOOLS.includes(mode)))return;
     e.preventDefault();
     view.controls.enabled = false;
+    if(mode==='move'){
+      beginMovement('pointer',view.beginObjectDrag(e.clientX,e.clientY,hit.world,moveAxis));view.canvas.setPointerCapture(e.pointerId);controls();return;
+    }
     stroke = {
       before: structuredClone(scene),
       normal: hit.normal,
@@ -263,30 +304,38 @@ if (view) {
       lastY: e.clientY,
     };
     view.canvas.setPointerCapture(e.pointerId);
+    view.holdSelection(true);
     stamp(e);
   });
   view.canvas.addEventListener("pointermove", (e) => {
-    if (stroke) {
+    if(movement?.kind==='pointer'){
+      const frame=movement.frame;if(!movement.dragged&&Math.hypot(e.clientX-frame.x,e.clientY-frame.y)<3)return;
+      movement.dragged=true;const raw=view.objectDragDelta(frame,e.clientX,e.clientY);if(!raw)return;
+      const delta=raw.map((v,i)=>(v-movement.raw[i])*(e.shiftKey ? .1 : 1));movement.raw=raw;moveObject(delta);
+    } else if (stroke) {
       if (Math.hypot(e.clientX - stroke.lastX, e.clientY - stroke.lastY) < 2)
         return;
       stroke.lastX = e.clientX;
       stroke.lastY = e.clientY;
       stamp(e);
-    } else if (mode !== "view"&&mode!=='pan'&&mode!=='select' && !alt&&!job)
+    } else if (BRUSH_TOOLS.includes(mode) && !alt&&!job&&!exporting)
       view.cursor(view.pick(e.clientX, e.clientY), brush.radius);
   });
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"])
     view.canvas.addEventListener(type, () => {
       endStroke();
+      if(movement?.kind==='pointer')endMovement(type!=='pointerup');
       view.controls.enabled = true;
     });
   view.canvas.addEventListener("pointerleave", () => {
     if (!stroke) view.cursor(null, brush.radius);
   });
   view.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  view.canvas.addEventListener('blur',()=>endMovement());
   view.canvas.addEventListener("webglcontextlost", (e) => {
     e.preventDefault();
     endStroke();
+    endMovement(true);
     status(
       "그래픽 연결이 끊겼습니다. 모델을 JSON으로 저장하고 다시 열어 주세요.",
     );
@@ -295,6 +344,7 @@ if (view) {
 $("undo").onclick = () => {
   if(job||exporting)return;
   endStroke();
+  endMovement();
   scene = history.undo(scene);
   rebuild();
   save();
@@ -302,6 +352,7 @@ $("undo").onclick = () => {
 $("redo").onclick = () => {
   if(job||exporting)return;
   endStroke();
+  endMovement();
   scene = history.redo(scene);
   rebuild();
   save();
@@ -318,6 +369,7 @@ function download(blob, name) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 $("save").onclick = () => {
+  endStroke();endMovement();
   try {
     download(
       new Blob([encode(scene)], { type: "application/json" }),
@@ -331,6 +383,7 @@ $("save").onclick = () => {
 function replace(q) {
   if(job||exporting)return;
   endStroke();
+  endMovement();
   scene = validate(q);p=active(scene);marked.clear();marked.add(p.id);
   blocked = false;
   history.back = [];
@@ -361,6 +414,7 @@ for (const kind of ["glb", "stl", "png"])
   $(kind).onclick = async () => {
     if (exporting || !view||job) return;
     endStroke();
+    endMovement();
     exporting = true;
     document
       .querySelectorAll(".export button")
@@ -390,7 +444,7 @@ for (const kind of ["glb", "stl", "png"])
     }
   };
 document.addEventListener("keydown", (e) => {
-  if (e.target.closest("input,select,textarea")) return;
+  if (e.target.closest("input,select,textarea,[contenteditable]:not([contenteditable=false])")||document.querySelector('dialog[open]')||e.isComposing) return;
   if (e.key === "Alt") {
     alt = true;
     controls();
@@ -403,21 +457,36 @@ document.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("save").click();
   }
+  const focused=document.activeElement===view?.canvas||document.activeElement===document.body;
+  if(!view||!focused||job||exporting||stroke)return;
+  if(e.key==='Escape'&&movement){e.preventDefault();endMovement(true);return;}
+  if(!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.repeat){
+    const key=e.key.toLowerCase();if(key==='g'||key==='v'){e.preventDefault();tool(key==='g'?'move':'select');return;}
+    if(key==='f'){e.preventDefault();endMovement();view.view('isometric',false);return;}
+    if(mode==='move'&&['x','y','z','c'].includes(key)){e.preventDefault();setMoveAxis(key==='c'?'screen':key);return;}
+  }
+  const command=motionCommand(e,{mode,focused});if(!command)return;e.preventDefault();
+  if(command.kind==='camera'){view.cursor(null,brush.radius);view.pan(command.dx*.25*(command.fine ? .1 : 1),command.dy*.25*(command.fine ? .1 : 1));return;}
+  if(movement?.kind==='pointer')return;
+  if(!movement)beginMovement('keyboard');moveKeys.add(command.key);
+  const {right,up}=view.basis(),delta=objectDelta(command.dx,command.dy,moveAxis,moveStep,right,up).map(v=>v*(command.fine ? .1 : 1));moveObject(delta);
 });
 document.addEventListener("keyup", (e) => {
   if (e.key === "Alt") {
     alt = false;
     controls();
   }
+  const key=e.key.length===1?e.key.toLowerCase():e.key;moveKeys.delete(key);if(movement?.kind==='keyboard'&&!moveKeys.size)endMovement();
 });
 window.addEventListener("blur", () => {
   alt = false;
   endStroke();
+  endMovement();
   if (view) view.controls.enabled = true;
   controls();
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) endStroke();
+  if (document.hidden) {endStroke();endMovement();}
 });
 window.addEventListener("beforeunload", (e) => {
   if (dirty) {
@@ -433,7 +502,7 @@ window.addEventListener("storage", (e) => {
     );
   }
 });
-function selectObject(id){if(job||stroke||exporting)return;if(!scene.objects.some(o=>o.id===id))return;scene.activeId=id;p=active(scene);neighbors=adjacency(p.mesh);view?.setActiveObject(id);render();if(view)previewPlane();}
+function selectObject(id){if(job||stroke||exporting||movement)return;if(!scene.objects.some(o=>o.id===id))return;scene.activeId=id;p=active(scene);neighbors=adjacency(p.mesh);view?.setActiveObject(id);view?.flashSelection();render();if(view)previewPlane();view?.canvas.focus({preventScroll:true});}
 function renderObjects(){
   const t=totals(scene);$('object-count').textContent=`${scene.objects.length} / 8개 · 전체 ${t.vertices.toLocaleString()} 정점 / 131072`;
   for(const id of marked)if(!scene.objects.some(o=>o.id===id))marked.delete(id);if(!marked.size)marked.add(p.id);
@@ -459,7 +528,7 @@ document.querySelectorAll('[data-pan]').forEach(b=>b.onclick=()=>view?.pan(...b.
 $('focus-object').onclick=()=>view?.view('isometric',false);$('fit-scene').onclick=()=>view?.view('isometric',true);
 function finishJob(message){if(!job)return;clearTimeout(job.timer);job.worker.terminate();job=null;$('cancel-cut').hidden=true;status(message);}
 function runCut(byRatio){
-  if(job||exporting||!view)return;endStroke();if(scene.objects.length>=8){status('분할하려면 객체 자리가 한 개 필요합니다.');return;}
+  if(job||exporting||!view)return;endStroke();endMovement();if(scene.objects.length>=8){status('분할하려면 객체 자리가 한 개 필요합니다.');return;}
   try{const {normal,offset}=planeParameters(),ratio=byRatio?Number($('split-ratio').value)/100:null;if(ratio!==null&&(!Number.isFinite(ratio)||ratio<.01||ratio>.99))throw Error('A 부피 비율은 1–99%입니다.');
     const worker=new Worker(new URL('./geometry-worker.js',import.meta.url),{type:'module'});job={worker,timer:setTimeout(()=>finishJob('분할 시간이 길어 취소했습니다. 더 단순한 메시를 사용하세요.'),20000)};$('cancel-cut').hidden=false;status('단면과 부피를 계산하는 중… 취소할 수 있습니다.');
     worker.onmessage=event=>{const result=event.data;if(!result.ok){finishJob(result.error);return;}try{const before=structuredClone(scene),next=structuredClone(scene);acceptSplit(next,result.pieces);scene=next;p=active(scene);history.push(before);finishJob(`분할 완료 · A ${(result.ratio*100).toFixed(3)}% / B ${((1-result.ratio)*100).toFixed(3)}%`);$('plane-offset').value=result.offset;marked.clear();for(const o of scene.objects.slice(-2))marked.add(o.id);rebuild();save();previewPlane();}catch(e){finishJob(e.message);}};
@@ -468,4 +537,4 @@ function runCut(byRatio){
 }
 $('cut-plane').onclick=()=>runCut(false);$('cut-ratio').onclick=()=>runCut(true);$('cancel-cut').onclick=()=>finishJob('분할을 취소했습니다. 원본은 유지됩니다.');
 render();
-controls();
+tool('select');

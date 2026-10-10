@@ -36,8 +36,8 @@
     </header>
     <div class="workspace">
       <nav class="tools" aria-label="조각 도구">
-        <button data-tool="select"><span>↖</span>선택</button><button data-tool="pan"><span>✥</span>중심 이동</button><button data-tool="view" aria-pressed="false"><span>↻</span>보기</button
-        ><button data-tool="add" aria-pressed="true"><span>＋</span>밀기</button
+        <button data-tool="select" aria-pressed="true" title="V"><span>↖</span>선택</button><button data-tool="move" title="G"><span>⤧</span>객체 이동</button><button data-tool="pan"><span>✥</span>중심 이동</button><button data-tool="view" aria-pressed="false"><span>↻</span>보기</button
+        ><button data-tool="add" aria-pressed="false"><span>＋</span>밀기</button
         ><button data-tool="subtract"><span>−</span>깎기</button
         ><button data-tool="smooth"><span>≈</span>다듬기</button
         ><button data-tool="flatten"><span>▱</span>평탄화</button
@@ -51,7 +51,7 @@
       <main>
         <div class="view-bar">
           <div>
-            <strong id="tool-name">밀기 브러시</strong><span>좌표 단위 m</span>
+            <strong id="tool-name">객체 선택</strong><span>좌표 단위 m</span>
           </div>
           <div class="views">
             <button data-view="front">앞</button
@@ -62,22 +62,26 @@
             ><label><input id="ground" type="checkbox" checked />격자</label>
           </div>
         </div>
+        <div id="move-options" class="move-strip" hidden>
+          <div role="group" aria-label="객체 이동 방향"><button data-move-axis="screen" aria-pressed="true" title="C">화면</button><button data-move-axis="x" aria-pressed="false">X</button><button data-move-axis="y" aria-pressed="false">Y</button><button data-move-axis="z" aria-pressed="false">Z</button></div>
+          <label>키보드 간격 · m<input id="move-step" type="number" min=".0001" max="10" step=".001" value=".01"></label><small>Shift: 1/10 · Esc: 이동 취소</small>
+        </div>
         <div id="viewport" role="region" aria-label="조각 화면">
           <div id="webgl-error" hidden>
             WebGL 2를 사용할 수 없습니다. 하드웨어 가속을 지원하는 브라우저에서
             열어 주세요.
           </div>
           <div class="viewport-label">
-            <strong>STUDIO VIEW</strong><span id="mesh-count"></span>
+            <strong>STUDIO VIEW</strong><span id="mesh-count"></span><span id="selected-object" class="selection-badge" aria-live="polite"></span>
           </div>
           <div id="cursor-help">
-            선택 도구로 객체 선택 · 드래그로 조각 · 오른쪽 드래그로 회전 · 중심 이동 도구로 화면 이동
+            클릭 선택 · 방향키·WASD 화면 이동 · G 객체 이동 · 오른쪽 드래그 회전
           </div>
         </div>
         <div class="view-status">
           <span id="storage-status">브라우저 저장</span
           ><output id="status" role="status"
-            >표면을 드래그해 조각을 시작하세요.</output
+            >객체를 클릭해 선택하세요.</output
           >
         </div>
       </main>
@@ -85,6 +89,11 @@
         <section class="object-manager">
           <h1>장면의 객체</h1><p id="object-count"></p><div id="object-list" aria-label="객체 목록"></div>
           <div class="object-actions"><button id="add-object">＋ 덩어리 추가</button><button id="copy-object">복사</button><button id="delete-object">삭제</button></div>
+          <details id="selection-settings" class="selection-settings"><summary>선택 표시</summary>
+            <label>테두리<select id="selection-mode"><option value="gesture" selected>조작할 때만 잠깐</option><option value="always">항상 표시</option><option value="hidden">표시하지 않음</option></select></label>
+            <label>선 굵기 · px<input id="selection-width" type="number" min=".25" max="3" step=".25" value=".75"></label>
+            <label for="selection-opacity">선 농도</label><input id="selection-opacity" aria-label="선택 테두리 농도" type="range" min=".05" max="1" step=".05" value=".35">
+          </details>
           <button id="merge-objects">체크한 객체를 하나로 묶기</button><p>병합은 모양을 그대로 유지합니다. 겹친 내부 면을 제거하는 불리언 합집합은 아닙니다.</p>
           <p id="object-size"></p><p id="object-volume"></p>
           <label>부피 배율<input id="volume-factor" type="number" value="1" min=".000001" max="1000000" step=".01"></label><button id="volume-apply">부피 비율 적용</button><p>배율 8은 세 축 길이를 각각 2배로 바꿉니다. 재질의 실제 질량을 정하는 기능은 아닙니다.</p>
