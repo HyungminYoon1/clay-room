@@ -1,5 +1,15 @@
 # Decisions
 
+## D09 — Evidence-first boundary and stale-input repair (2026-10-13)
+
+Context: the new post-maintenance audit executed failing assertions before product edits; see [edge audit](edge-cases-20261013.md). Async file completion could replace a later accepted file, edit/new document, or still-focused typed text.
+
+Options: block the whole editor while reading, accept whichever read finishes last, or invalidate pending reads when newer user input takes precedence. Decision: keep a page-memory generation in app.js; capture it at file selection, invalidate on subsequent input/edit/undo/redo/replacement and relevant gestures/jobs, and ignore stale completion/error before parsing or confirmation. Clear the file input immediately so older completion cannot clear a newer file. Rationale: preserve the user's newer work without freezing the editor or changing persisted data.
+
+Additional boundary decision: Normalize finite plane normals with scaling to avoid floating-point overflow, while preserving direction and the existing near-zero threshold. This does not alter split ratios, caps, resource/time budgets, units or schema. File ordering protection stays in the DOM adapter, separate from mesh/scene/worker geometry.
+
+Affected files: dist/src/app.js, dist/src/cut-model.js, test/edge.test.js, tools/edge-browser.mjs, docs/edge-cases-20261013.md, docs/verification.md, docs/decisions.md. No architecture/layer/schema/storage-key/resource-limit/dependency expansion. Review: the exact failing assertions pass after fixes; full suite and real1440/390/320 interactions/export harness pass. Baseline-passing tests remain coverage additions. Physical hardware, external editor interoperability and remote CI/live require separate review; parent owns publication.
+
 ## D08 — Independent materials for split objects (2026-10-13)
 
 Context: acceptSplit spread the original object into A and B, sharing the mutable material object. Editing A's color/roughness immediately changed B; serialization later separated references but did not restore the lost appearance. Options: repair references during UI edits, clone entire geometry again, or copy material at the model's split boundary. Decision: each accepted piece gets its own material record; retain existing independent mesh outputs and identity transforms. Rationale: per-object editing must preserve the other piece without extra geometry allocation or schema migration. Affected: scene-model, scene regression tests, index/objects.css practice panel, tools/verify-browser.mjs. Review: the regression first failed, then passed with file roundtrip and undo/redo; actual worker split, two separate colors, camera/object/pointer routing, mesh preservation, GLB materials/STL world coordinates and 4K PNG. No quality, object/resource budget, provider or persistence-key change. Arbitrary self-intersection repair and printing guarantees remain unsupported.

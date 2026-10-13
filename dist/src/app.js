@@ -22,6 +22,9 @@ let scene = project("pebble", innerWidth > 680),p=active(scene),
   alt = false,
   exporting = false,job=null,movement=null,moveAxis='screen',moveStep=.01,keyboardKind=null,keyboardFrame=0;
 const marked=new Set();
+let importGeneration = 0;
+// A late file read must not discard even an input that has not blurred yet.
+document.addEventListener("input", () => { importGeneration++; });
 const keyboardMotion=new SmoothKeys();
 try {
   const raw = localStorage.getItem(KEY);
@@ -85,6 +88,7 @@ function render() {
 }
 function change(fn) {
   if(job||exporting){status('진행 중인 작업을 마친 뒤 편집하세요.');return false;}
+  importGeneration++;
   if (stroke) endStroke();
   endMovement();
   const before = structuredClone(scene);
@@ -242,6 +246,7 @@ function endStroke() {
   stroke = null;
   view?.holdSelection(false);
   if (s.changed) {
+    importGeneration++;
     try {
       validate(scene);
       history.push(s.before);
@@ -258,6 +263,7 @@ function endStroke() {
 }
 function beginMovement(kind,frame=null){
   if(movement||stroke||job||exporting||!view)return false;
+  importGeneration++;
   movement={kind,frame,before:structuredClone(scene),changed:false,raw:[0,0,0],dragged:false};
   view.holdSelection(true);view.cursor(null,brush.radius);return true;
 }
@@ -319,6 +325,7 @@ if (view) {
       lastX: e.clientX,
       lastY: e.clientY,
     };
+    importGeneration++;
     view.canvas.setPointerCapture(e.pointerId);
     view.holdSelection(true);
     stamp(e);
@@ -359,6 +366,7 @@ if (view) {
 }
 $("undo").onclick = () => {
   if(job||exporting)return;
+  importGeneration++;
   endStroke();
   endMovement();
   scene = history.undo(scene);
@@ -367,6 +375,7 @@ $("undo").onclick = () => {
 };
 $("redo").onclick = () => {
   if(job||exporting)return;
+  importGeneration++;
   endStroke();
   endMovement();
   scene = history.redo(scene);
@@ -398,6 +407,7 @@ $("save").onclick = () => {
 };
 function replace(q) {
   if(job||exporting)return;
+  importGeneration++;
   endStroke();
   endMovement();
   scene = validate(q);p=active(scene);marked.clear();marked.add(p.id);
@@ -414,16 +424,18 @@ $("new-dialog").addEventListener("close", () => {
     try{replace(project($("shape").value, $("quality").value === "medium",Number($('initial-size').value)));}catch(e){status(e.message);}
 });
 $("open").onchange = async () => {
+  const token = ++importGeneration;
   const file = $("open").files[0];
+  $("open").value = "";
   if (!file) return;
   try {
     if (file.size > 24000000) throw Error("24MB 이하 프로젝트를 선택하세요.");
-    const q = parse(await file.text());
+    const raw = await file.text();
+    if (token !== importGeneration) return;
+    const q = parse(raw);
     if (confirm("현재 조각을 불러온 파일로 바꿀까요?")) replace(q);
   } catch (e) {
-    status(e.message);
-  } finally {
-    $("open").value = "";
+    if (token === importGeneration) status(e.message);
   }
 };
 for (const kind of ["glb", "stl", "png"])
@@ -546,6 +558,7 @@ $('focus-object').onclick=()=>view?.view('isometric',false);$('fit-scene').oncli
 function finishJob(message){if(!job)return;clearTimeout(job.timer);job.worker.terminate();job=null;$('cancel-cut').hidden=true;status(message);}
 function runCut(byRatio){
   if(job||exporting||!view)return;endStroke();endMovement();if(scene.objects.length>=8){status('분할하려면 객체 자리가 한 개 필요합니다.');return;}
+  importGeneration++;
   try{const {normal,offset}=planeParameters(),ratio=byRatio?Number($('split-ratio').value)/100:null;if(ratio!==null&&(!Number.isFinite(ratio)||ratio<.01||ratio>.99))throw Error('A 부피 비율은 1–99%입니다.');
     const worker=new Worker(new URL('./geometry-worker.js',import.meta.url),{type:'module'});job={worker,timer:setTimeout(()=>finishJob('분할 시간이 길어 취소했습니다. 더 단순한 메시를 사용하세요.'),20000)};$('cancel-cut').hidden=false;status('단면과 부피를 계산하는 중… 취소할 수 있습니다.');
     worker.onmessage=event=>{const result=event.data;if(!result.ok){finishJob(result.error);return;}try{const before=structuredClone(scene),next=structuredClone(scene);acceptSplit(next,result.pieces);scene=next;p=active(scene);history.push(before);finishJob(`분할 완료 · A ${(result.ratio*100).toFixed(3)}% / B ${((1-result.ratio)*100).toFixed(3)}%`);$('plane-offset').value=result.offset;marked.clear();for(const o of scene.objects.slice(-2))marked.add(o.id);rebuild();save();previewPlane();}catch(e){finishJob(e.message);}};
