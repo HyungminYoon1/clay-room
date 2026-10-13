@@ -15,3 +15,16 @@ test('actual ratio split is accurate on sphere and edited pebble, including 50%'
 test('nested cap loops retain a genuine hole',()=>{const g=new TorusGeometry(1,.3,12,64);g.deleteAttribute('normal');g.deleteAttribute('uv');const welded=mergeVertices(g,1e-6),mesh={positions:new Float32Array(welded.attributes.position.array),indices:new Uint32Array(welded.index.array)},object={...active(project('sphere',false)),mesh};assert(closed(mesh));const result=splitObject(object,[0,0,1],0);assert(result.pieces.every(closed));assert(Math.abs(result.ratio-.5)<1e-5);assert(Math.abs(result.pieces.reduce((s,m)=>s+signedVolume(m),0)-signedVolume(mesh))<1e-5);});
 test('invalid/open/outside cuts and invalid scene payloads are rejected',()=>{const p=active(project('sphere',false));assert.throws(()=>normalVector([0,0,0]));assert.throws(()=>splitObject(p,[1,0,0],4));assert.throws(()=>splitObject(p,[1,0,0],0,1));const open=structuredClone(p);open.mesh.indices=open.mesh.indices.slice(3);assert.throws(()=>splitObject(open));const q=JSON.parse(encode(project('sphere',false)));q.objects.push(...Array(8).fill(q.objects[0]));assert.throws(()=>parse(JSON.stringify(q)));q.objects=[];assert.throws(()=>parse(JSON.stringify(q)));});
 test('whole-scene undo/redo retains IDs, materials and the combined history budget',()=>{const s=project('sphere',false),h=new History();h.push(s);duplicate(s);const restored=h.undo(s);assert.equal(restored.objects.length,1);const redone=h.redo(restored);assert.equal(redone.objects.length,2);for(let i=0;i<30;i++)h.push(redone);assert(h.back.length<=20);assert(h.back.reduce((sum,p)=>sum+totals(p).bytes+2048,0)<=MAX_HISTORY_BYTES);});
+
+test('split pieces have independent materials before and after file roundtrip and undo',()=>{
+  const scene=project('sphere',false),before=structuredClone(scene),history=new History();
+  const result=splitObject(active(scene),[1,0,0],0);
+  history.push(before);acceptSplit(scene,result.pieces);
+  const [a,b]=scene.objects,original=structuredClone(b.material);
+  a.material.color='#496961';a.material.roughness=.2;
+  assert.deepEqual(b.material,original);
+  assert.deepEqual(active(before).material,original);
+  const restored=parse(encode(scene));assert.deepEqual(restored.objects[1].material,original);
+  const undone=history.undo(scene);assert.deepEqual(undone,before);
+  assert.deepEqual(history.redo(undone),scene);
+});

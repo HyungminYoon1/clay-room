@@ -1,0 +1,43 @@
+import { createRequire } from 'node:module';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import assert from 'node:assert/strict';
+import { parse, encode, active, transformPoint } from '../dist/src/scene-model.js';
+const { chromium }=createRequire(resolve(process.argv[2]))('playwright');
+const root=resolve(import.meta.dirname,'..'),out=resolve(root,'output/playwright/qa-20261013');await mkdir(out,{recursive:true});
+const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--mute-audio']});
+const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});
+const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
+const checks=[],screenshots=[],raw=()=>page.evaluate(()=>localStorage.getItem('clay-room-project-v1')),scene=async()=>parse(await raw());
+const download=async(selector,name)=>{const promise=page.waitForEvent('download');await page.locator(selector).click();const d=await promise;const path=resolve(out,name);await d.saveAs(path);return path;};
+const field=async(id,value)=>{await page.locator('#'+id).fill(String(value));await page.locator('#'+id).press('Tab');};
+try{
+  await page.goto('http://127.0.0.1:4293/');assert(await page.locator('#webgl-error').isHidden());
+  await page.locator('#new').click();await page.locator('#shape').selectOption('sphere');await page.locator('#quality').selectOption('low');await page.locator('#create').click();await page.waitForFunction(()=>document.querySelector('#title').value==='새 조각');
+  await page.locator('.cut-controls').filter({has:page.locator('#plane-preset')}).locator('summary').click();await page.locator('#plane-center').click();await page.locator('#cut-plane').click();await page.waitForFunction(()=>document.querySelector('#status').textContent.includes('분할 완료'));
+  let s=await scene();assert.equal(s.objects.length,2);const [a,b]=s.objects;
+  await field('color','#496961');await field('roughness',.2);s=await scene();assert.equal(s.objects[0].material.color,'#496961');assert.equal(s.objects[1].material.color,b.material.color);assert.equal(s.objects[1].material.roughness,b.material.roughness);
+  await page.locator('#object-list button').nth(1).click();await field('color','#86526b');await field('position0',.35);const two=await scene();assert.equal(two.objects[0].material.color,'#496961');assert.equal(two.objects[1].material.color,'#86526b');checks.push('actual worker split; independent A/B color/roughness and position');
+  await page.locator('#undo').click();assert.equal(active(await scene()).transform.position[0],0);await page.locator('#redo').click();assert.deepEqual(await scene(),two);checks.push('whole-scene undo/redo restores both objects and materials');
+  await page.locator('[data-view=front]').click();await page.locator('#viewport canvas').focus();const cameraBefore=await page.locator('#camera0').inputValue(),rawBefore=await raw();
+  await page.keyboard.press('ArrowRight');await page.waitForTimeout(320);assert.notEqual(await page.locator('#camera0').inputValue(),cameraBefore);assert(await raw()===rawBefore);checks.push('camera keys move view without saving/deforming objects');
+  await page.keyboard.press('g');await page.keyboard.press('x');await page.keyboard.press('Shift+ArrowRight');await page.waitForTimeout(320);
+  const fine=await scene();assert(Math.abs(active(fine).transform.position[0]-.351)<1e-12);assert.deepEqual(active(fine).mesh,active(two).mesh);
+  await page.keyboard.down('ArrowRight');await page.waitForTimeout(120);await page.keyboard.press('Escape');await page.keyboard.up('ArrowRight');assert.deepEqual(await scene(),fine);assert(Math.abs(Number(await page.locator('#position0').inputValue())-.351)<1e-12);
+  await page.keyboard.press('v');assert((await page.locator('#keyboard-mode').textContent()).includes('카메라 중심'));checks.push('G/X precise Shift tap; held-object Escape; V returns camera; mesh untouched');
+  await page.locator('[data-view=front]').click();await page.locator('#viewport canvas').focus();await page.keyboard.press('g');await page.keyboard.press('x');
+  const box=await page.locator('#viewport canvas').boundingBox();await page.mouse.move(box.x+box.width/2,box.y+box.height/2);await page.mouse.down();await page.mouse.move(box.x+box.width/2+35,box.y+box.height/2,{steps:8});await page.mouse.up();
+  const pointer=await scene();assert(active(pointer).transform.position[0]>.351);assert.deepEqual(active(pointer).mesh,active(fine).mesh);await page.locator('#undo').click();assert.deepEqual(await scene(),fine);await page.locator('#redo').click();assert.deepEqual(await scene(),pointer);checks.push('actual pointer object translation; one undo/redo; original vertices preserved');
+  await field('scale0',0);assert.deepEqual(await scene(),pointer);assert.equal(Number(await page.locator('#scale0').inputValue()),1);checks.push('invalid numeric scale rolls back full scene');
+  const json=await download('#save','roundtrip.clay.json');assert.deepEqual(parse(await readFile(json,'utf8')),pointer);await page.locator('#open').setInputFiles(json);await page.waitForFunction(()=>document.querySelector('#object-list').children.length===2);assert.deepEqual(await scene(),pointer);
+  await page.locator('#open').setInputFiles({name:'bad.json',mimeType:'application/json',buffer:Buffer.from('{')});assert.deepEqual(await scene(),pointer);checks.push('actual JSON download/reimport keeps mesh/transforms/materials; malformed import preserves scene');
+  const glb=await readFile(await download('#glb','scene.glb'));assert.equal(glb.subarray(0,4).toString(),'glTF');assert.equal(glb.readUInt32LE(4),2);const gltf=JSON.parse(glb.subarray(20,20+glb.readUInt32LE(12)).toString());assert.equal(gltf.meshes.length,2);assert.equal(gltf.materials.length,2);
+  const stl=await readFile(await download('#stl','scene-mm.stl'));const triangles=pointer.objects.reduce((sum,o)=>sum+o.mesh.indices.length/3,0);assert.equal(stl.readUInt32LE(80),triangles);assert.equal(stl.length,84+50*triangles);
+  let triangle=0;for(const object of pointer.objects){const mesh=object.mesh;for(let i=0;i<mesh.indices.length;i+=3){for(let j=0;j<3;j++){const at=mesh.indices[i+j]*3,expected=transformPoint(Array.from(mesh.positions.subarray(at,at+3)),object.transform);for(let axis=0;axis<3;axis++)assert(Math.abs(stl.readFloatLE(84+triangle*50+12+j*12+axis*4)/1000-expected[axis])<1e-6);}triangle++;}}
+  await page.locator('#fit-scene').click();const png=await readFile(await download('#png','full-4096.png'));assert.equal(png.readUInt32BE(16),4096);assert.equal(png.readUInt32BE(20),4096);assert(png.length>10000);checks.push(`GLB2 two meshes/materials; STL ${triangles} triangles/world mm coordinates; 4096×4096 PNG ${png.length} bytes`);
+  await page.locator('#practice summary').click();await page.locator('#practice').scrollIntoViewIfNeeded();await page.screenshot({path:resolve(out,'desktop.png')});screenshots.push('desktop.png');
+  for(const width of [390,320]){await page.setViewportSize({width,height:900});await page.locator('#practice').scrollIntoViewIfNeeded();assert.equal(await page.evaluate(()=>Math.max(0,document.documentElement.scrollWidth-innerWidth)),0);await page.screenshot({path:resolve(out,`mobile-${width}.png`)});screenshots.push(`mobile-${width}.png`);}
+  await page.locator('#object-list button').first().click();await page.locator('#viewport canvas').focus();await page.keyboard.press('v');await page.keyboard.press('g');await page.keyboard.press('x');const prior=Number(await page.locator('#position0').inputValue());await page.keyboard.press('ArrowRight');await page.waitForTimeout(320);assert(Math.abs(active(await scene()).transform.position[0]-prior-.01)<1e-12);checks.push('390/320 no overflow; narrow viewport object selection/key movement');
+  const damaged=await context.newPage();await damaged.addInitScript(()=>localStorage.setItem('clay-room-project-v1','{corrupt'));await damaged.goto('http://127.0.0.1:4293/');await damaged.locator('#title').fill('보존 확인');await damaged.locator('#title').press('Tab');assert.equal(await damaged.evaluate(()=>localStorage.getItem('clay-room-project-v1')),'{corrupt');await damaged.close();checks.push('damaged local record preserved while editing');
+  assert.deepEqual(errors,[]);const report={status:'PASS',checks,errors,screenshots,selectors:['#practice','#cut-plane','#object-list button','#color','#position0','#viewport canvas','#open']};await writeFile(resolve(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+}finally{await browser.close();}

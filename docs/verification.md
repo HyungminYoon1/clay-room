@@ -1,5 +1,16 @@
 # Verification
 
+## 2026-10-13 분할 객체 재질 보존 — LOCAL / 통합 대기
+
+- SOURCE VERIFIED: 저장소 인벤토리, architecture.md → requirements.md → README.md와 decisions/verification, attributes/ignore/workflow, scene/interaction/mesh/cut/worker/app/viewport, HTML·관련 objects.css, 기존3종 테스트와 build/check/serve. api-spec.md와 AGENTS.md는 없음. SOURCE PARTIAL: 기존 styles.css의 관련 레이아웃, vendor/라이선스/폰트 인벤토리·정적 검사; 라이브러리 전체 내부 구현과 바이너리 수동 검토는 아님.
+- 재현→수정: acceptSplit A/B가 재질 참조를 공유하여 A 색 #496961/거칠기0.2 편집이 B에도 반영됨. 새 scene regression이 먼저 FAIL, 분할 경계에서 재질 복사 후 PASS(JSON 왕복·undo/redo 포함). 기존 메시·변환·resource/schema 경계 유지.
+- 콘텐츠/UI: 새 구→실제 분할→A/B 개별색→G/X/0.01m 이동→V 카메라 비교→JSON/3D 전달 연습을 객체 패널에 추가. UI change: YES. provenance: scene-model.js의 acceptSplit/encode, interaction-model.js·app.js의 모드/간격, viewport.js의 GLB/STL 단위. 실제 앱 조작 안내이며 새 질량/출력 적합성 주장은 없음.
+- LOCAL: npm run build PASS(기존 pinned Three/Earcut), npm test **28/28 PASS**, npm run check **17 public files PASS**, git diff --check와 browser script 구문 검사 PASS.
+- ACTUAL BROWSER: 독립 음소거 Chrome headless/127.0.0.1:4293. 실제 Worker 구 분할→A녹색/B자주색·독립 거칠기·좌표, 전체 장면undo/redo. 카메라 방향키는 저장 bytes/정점 유지; G/X/Shift 탭0.001m, held 이동Esc취소, V복귀, 실제 마우스객체 이동·한 번undo/redo와 원래 mesh 보존. 숫자scale0 거절·복구. 실제 JSON 다운로드→재불러오기, malformed/손상저장 보존. GLB2 **2meshes/2materials**, STL **16,380triangles** 모든 world mm좌표를 JSON과1e-6m 이내 비교, PNG **4096×4096/1,868,464bytes** 실제 렌더링·시각 확인. 1440/390/320 root overflow0, 좁은 화면객체선택/0.01m키이동, page errors0.
+- 재실행: 서버 `node tools/serve.mjs 4293`; `node tools/verify-browser.mjs ../output/playwright/implement-20261012/package.json` (제공된 Playwright 설치와 현재 Windows Chrome 경로 사용). ignored output/playwright/qa-20261013의 report.json, desktop.png/mobile-390.png/mobile-320.png, full-4096.png, roundtrip.clay.json, scene.glb/scene-mm.stl. 캡처 상태: 펼친 연습과 분리된 녹색A/자주색B. selectors: #practice, #cut-plane, #object-list button, #color, #position0, #viewport canvas, #open.
+- NOT_RUN: 실제 터치/물리GPU·모든브라우저, 임의자기교차수리, 외부CAD/프린터. 기존 unsupported 제한 유지. REMOTE_CI/LIVE/commit/push/deploy는 실행하지 않음. D08 참조.
+- 통합 파일(7): dist/src/scene-model.js, dist/index.html, dist/objects.css, test/scene.test.js, docs/decisions.md, docs/verification.md, tools/verify-browser.mjs. 모두 UTF-8 no BOM / CRLF 확인. 기존 vendor/라이선스 빌드 결과는 normalize 후 원래 bytes로 일치하여 변경 목록에서 제외됨.
+
 ## 2026-10-10 부드러운 키 이동과 모드 복귀 — LOCAL
 
 - SOURCE VERIFIED: 이번 변경의 architecture/requirements/README/decisions, app·interaction model·관련 테스트·index/객체 CSS, viewport와 check/serve/normalize/workflow를 확인했습니다. 기존 geometry/cut/worker와 다른 앱의 모든 코드 재검토는 PARTIAL입니다. D07에 입력 시간·완료·취소·저장 경계를 기록했습니다.
